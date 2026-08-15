@@ -1,0 +1,115 @@
+version: '3.8'
+
+services:
+
+  # 1. Nginx - Web server for BOTH systems (port 80 = Main, port 81 = Microservice)
+  nginx:
+    image: nginx:alpine
+    container_name: anquillano_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "81:81"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./nginx/ssl:/etc/nginx/ssl
+      - ./main_system:/var/www/main_system
+      - ./microservice:/var/www/microservice
+    depends_on:
+      - php
+      - php-microservice
+    networks:
+      - app-network
+
+  # 2. PHP-FPM - Application server for the Main System (Library CRUD)
+  php:
+    build:
+      context: ./php
+      dockerfile: Dockerfile
+    image: anquillano-php-main:8.2
+    container_name: anquillano_php_main
+    restart: unless-stopped
+    volumes:
+      - ./main_system:/var/www/main_system
+      - ./php/conf.d/php.ini:/usr/local/etc/php/conf.d/custom.ini
+    depends_on:
+      - mysql
+    networks:
+      - app-network
+
+  # 3. PHP-FPM - Application server for the Microservice System (Author API)
+  php-microservice:
+    build:
+      context: ./php
+      dockerfile: Dockerfile
+    image: anquillano-php-micro:8.2
+    container_name: anquillano_php_microservice
+    restart: unless-stopped
+    volumes:
+      - ./microservice:/var/www/microservice
+      - ./php/conf.d/php.ini:/usr/local/etc/php/conf.d/custom.ini
+    depends_on:
+      - mysql
+    networks:
+      - app-network
+
+  # 4. MySQL - Shared database with native auth
+  mysql:
+    image: mysql:8.0
+    container_name: anquillano_mysql
+    restart: unless-stopped
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: library_db
+      MYSQL_USER: library_user
+      MYSQL_PASSWORD: library_pass
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./mysql/init:/docker-entrypoint-initdb.d
+      - ./mysql/data:/var/lib/mysql
+    networks:
+      - app-network
+
+  # 5. phpMyAdmin - Database management
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin:latest
+    container_name: anquillano_phpmyadmin
+    restart: unless-stopped
+    environment:
+      PMA_HOST: mysql
+      PMA_USER: root
+      PMA_PASSWORD: rootpass
+    ports:
+      - "8080:80"
+    depends_on:
+      - mysql
+    networks:
+      - app-network
+
+  # 6. Redis - Caching layer
+  redis:
+    image: redis:alpine
+    container_name: anquillano_redis
+    restart: unless-stopped
+    volumes:
+      - ./redis/data:/data
+    networks:
+      - app-network
+
+  # 7. Workspace - Devilbox PHP-FPM development environment (composer, cli tools, etc.)
+  workspace:
+    image: devilbox/php-fpm:8.2-work
+    container_name: anquillano_workspace
+    restart: unless-stopped
+    volumes:
+      - ./:/shared/httpd
+    tty: true
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
